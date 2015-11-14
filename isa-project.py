@@ -1,13 +1,15 @@
 #!/usr/bin/env python3.4
 # -*- coding: utf-8 -*-
 
-__author__ = 'xmasek15'
-
-import os
+from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
+import os
 import shutil
 import sys
 import gzip
+import bencodepy
+
+__author__ = 'xmasek15@stud.fit.vutbr.cz'
 
 
 def log(message, out=sys.stderr):
@@ -19,7 +21,10 @@ def error(message, code=1, out=sys.stderr):
     exit(code)
 
 
-def download_torrent(url, fname):
+def download_torrent(url):
+    fname = os.getcwd() + '/' + url.split('title=')[-1] + '.torrent'
+    log('Downloading >> ' + fname)
+
     try:
         get_request = request.Request(url, method='GET',
                                       headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)',
@@ -33,27 +38,66 @@ def download_torrent(url, fname):
         with open(fname, 'wb') as f:
             shutil.copyfileobj(response, f)
 
+        # server response can be gzipped, this will decode the response so torrent will can be parsed
         if response.getheader('Content-Encoding') == 'gzip':
             log("Decompressing response")
             with open(fname, 'rb') as f:
-                unzipped = gzip.decompress(f.read())
+                torrent = gzip.decompress(f.read())
 
             with open(fname, 'wb') as f:
-                f.write(unzipped)
+                f.write(torrent)
         else:
             log("File should not be compressed according to response header")
+            torrent = open_torrent(fname)
+
+        return torrent
 
     except Exception as e:
-        error('Exception happend\n\n' + str(e), 3)
+        error('Exception happened\n\n' + str(e), 3)
+
+
+def open_torrent(name):
+    with open(name, 'rb') as f:
+        return f.read()
+
+
+def parse_torrent(torrent):
+    # Decoded object contains b'value' as binary data, that is why we need use it explicitly sometimes,
+    # otherwise it wont match the values
+    decoded = bencodepy.decode(torrent)
+
+    http_trackers = []
+
+    # if 'announce-list' keyword is missing in list, there is only one tracker for this torrent available
+    # and therefor 'announce' will be used to connect to the torrent tracker
+    if b'announce-list' in decoded:
+        log("announce-list keyword is present, there are more possible trackers")
+        usable_trackers(decoded[b'announce-list'], http_trackers)
+    else:
+        log("announce-list keyword is NOT present in dictionary, only one choice for tracker")
+        # here will be value under keyword announce used as only tracker
+        usable_trackers(decoded[b'announce'], http_trackers)
+
+    pprint(http_trackers)
+
+
+def usable_trackers(tracker, http_trackers):
+    # Due to extend of standard list of backups can be passed as single tracker, this will check them all one by one
+    # to see if there is any of http ones
+    if isinstance(tracker, list):
+        # Iterate through the all backups of the tracker or through the all trackers in the list, if more than one
+        # tracker is passed (announce-list was present in torrent file metadata)
+        for backup in tracker:
+            usable_trackers(backup, http_trackers)
+    else:
+        if tracker[:4] == b'http':
+            http_trackers.append(tracker.decode("utf-8"))
 
 
 def start():
-    url = "http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit"
-    fname = os.getcwd() + '/' + url.split('title=')[-1] + '.torrent'
-
-    log('Downloading >> ' + fname)
-    download_torrent(url, fname)
-    log('>> Done <<')
+    torrent = download_torrent("http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
+    # torrent = open_torrent('test.torrent')
+    parse_torrent(torrent)
 
 
 if __name__ == '__main__':
