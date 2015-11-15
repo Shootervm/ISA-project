@@ -8,6 +8,7 @@ import shutil
 import sys
 import gzip
 import bencodepy
+import hashlib
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
@@ -62,26 +63,33 @@ def open_torrent(name):
 
 
 def parse_torrent(torrent):
-    # Decoded object contains b'value' as binary data, that is why we need use it explicitly sometimes,
+    # Decoded torrent_metadata object contains b'value' as binary data, that is why we need use it explicitly sometimes,
     # otherwise it wont match the values
-    decoded = bencodepy.decode(torrent)
+
+    torrent_metadata = bencodepy.decode(torrent)
 
     http_trackers = []
 
     # if 'announce-list' keyword is missing in list, there is only one tracker for this torrent available
     # and therefor 'announce' will be used to connect to the torrent tracker
-    if b'announce-list' in decoded:
+    if b'announce-list' in torrent_metadata:
         log("announce-list keyword is present, there are more possible trackers")
-        usable_trackers(decoded[b'announce-list'], http_trackers)
+        usable_trackers(torrent_metadata[b'announce-list'], http_trackers)
     else:
         log("announce-list keyword is NOT present in dictionary, only one choice for tracker")
         # here will be value under keyword announce used as only tracker
-        usable_trackers(decoded[b'announce'], http_trackers)
+        usable_trackers(torrent_metadata[b'announce'], http_trackers)
 
     pprint(http_trackers)
 
+    info_hash = get_info_hash(torrent_metadata[b'info'])
+    peer_id = "PY3-ISA-project-2015"
+
+    pprint(info_hash)
+    pprint(peer_id)
 
 def usable_trackers(tracker, http_trackers):
+    # TODO: will be called f.e. split_trackers to http and udp ones and create something like {"http": [], "udp": []}
     # Due to extend of standard list of backups can be passed as single tracker, this will check them all one by one
     # to see if there is any of http ones
     if isinstance(tracker, list):
@@ -94,10 +102,18 @@ def usable_trackers(tracker, http_trackers):
             http_trackers.append(tracker.decode("utf-8"))
 
 
+def get_info_hash(metadata):
+    # info metadata are again bencoded and sha1 hash is created from them
+    return hashlib.sha1(bencodepy.encode(metadata)).hexdigest()
+
+
 def start():
     torrent = download_torrent("http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
     # torrent = open_torrent('test.torrent')
+
     parse_torrent(torrent)
+
+
 
 
 if __name__ == '__main__':
