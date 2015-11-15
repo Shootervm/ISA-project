@@ -4,6 +4,7 @@
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
 from urllib.parse import urlencode
+from itertools import islice, takewhile, count
 import os
 import shutil
 import sys
@@ -122,7 +123,7 @@ def get_info_hash(metadata):
     return hashlib.sha1(bencodepy.encode(metadata)).digest()
 
 
-def connect_to_tracker(torrent_data):
+def connect_to_tracker(announce, torrent_data):
     announce = torrent_data['trackers']['http'][2]
 
     url = announce + create_tracker_request(torrent_data)
@@ -153,15 +154,42 @@ def create_tracker_request(params):
                               'info_hash': params['info_hash'], 'peer_id': params['peer_id']})
 
 
-def start():
-    torrent = download_torrent(
-        "http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
-
-    # torrent = open_torrent('test.torrent')
-
+def get_peers_for_torrent(torrent):
     torrent_data = parse_torrent(torrent)
+    # announce = torrent_data['trackers']['http'][2]
 
-    pprint(connect_to_tracker(torrent_data))
+    for announce in torrent_data['trackers']['http']:
+        get_peers_from_tracker(announce, torrent_data)
+
+
+def get_peers_from_tracker(announce, torrent_data):
+    response = connect_to_tracker(announce, torrent_data)
+    pprint(response)
+
+    peers = parse_peers_from_response(response)
+
+
+def parse_peers_from_response(response):
+    decoded = bencodepy.decode(response)
+    bin_peers = decoded[b'peers']
+
+    print("pretty:  >> ")
+    pprint(bin_peers)
+
+    print(len(bin_peers))
+
+    split_every = (lambda n, it: takewhile(bool, (list(islice(it, n)) for _ in count(0))))
+
+    pprint(list(split_every(6, bin_peers)))
+
+
+def start():
+    # torrent = download_torrent("http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
+
+    torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
+
+    peers_list = get_peers_for_torrent(torrent)
+    print(peers_list)
 
 
 if __name__ == '__main__':
@@ -170,3 +198,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         log('Script will be terminated!')
         exit(0)
+
