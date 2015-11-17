@@ -4,13 +4,13 @@
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
 from urllib.parse import urlencode
-from itertools import islice, takewhile, count
 import os
 import shutil
 import sys
 import gzip
 import bencodepy
 import hashlib
+import struct
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
@@ -159,28 +159,29 @@ def get_peers_for_torrent(torrent):
     # announce = torrent_data['trackers']['http'][2]
 
     for announce in torrent_data['trackers']['http']:
-        get_peers_from_tracker(announce, torrent_data)
+        print(get_peers_from_tracker(announce, torrent_data))
 
 
 def get_peers_from_tracker(announce, torrent_data):
     response = connect_to_tracker(announce, torrent_data)
     pprint(response)
 
-    peers = parse_peers_from_response(response)
-
-
-def parse_peers_from_response(response):
+    # response from tracker is bencoded and binary representation of peers addresses will be parsed to readable form
     decoded = bencodepy.decode(response)
     bin_peers = decoded[b'peers']
+    peers = ""
+    # bin peers data is field of bytes, where each 6 bytes represent one peer
+    for i in range(0, len(bin_peers), 6):
+        peers += parse_bin_peer(bin_peers[i:i + 6]) + "\n"
 
-    print("pretty:  >> ")
-    pprint(bin_peers)
+    return peers
 
-    print(len(bin_peers))
 
-    split_every = (lambda n, it: takewhile(bool, (list(islice(it, n)) for _ in count(0))))
-
-    pprint(list(split_every(6, bin_peers)))
+def parse_bin_peer(bin_peer):
+    # will return a string containing first four bytes of byte peer formatted as IP address
+    # and second two as unsigned integer port for big endian network conversion
+    return "%d.%d.%d.%d:%d" % (int(bin_peer[0]), int(bin_peer[1]), int(bin_peer[2]), int(bin_peer[3]),
+                               struct.unpack(">H", bin_peer[4:6])[0])  # dereference of returned tuple first item
 
 
 def start():
@@ -198,4 +199,3 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         log('Script will be terminated!')
         exit(0)
-
