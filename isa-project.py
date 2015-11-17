@@ -3,6 +3,7 @@
 
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
+from urllib.error import URLError
 from urllib.parse import urlencode
 import os
 import shutil
@@ -124,8 +125,6 @@ def get_info_hash(metadata):
 
 
 def connect_to_tracker(announce, torrent_data):
-    announce = torrent_data['trackers']['http'][2]
-
     url = announce + create_tracker_request(torrent_data)
     pprint(url)
 
@@ -145,8 +144,11 @@ def connect_to_tracker(announce, torrent_data):
         # server response can be gzipped, this will decode the response so torrent will can be parsed
         return open_torrent(fname, response.getheader('Content-Encoding') == 'gzip')
 
+    except URLError as e:
+        log('Due to exception ' + str(e) + ' skipping tracker [ ' + announce + ' ]\n')
+        return
     except Exception as e:
-        error('Exception happened\n\n' + str(e), 3)
+        error('Exception happened\n\n' + str(e), 99)
 
 
 def create_tracker_request(params):
@@ -157,29 +159,35 @@ def create_tracker_request(params):
 def get_peers_for_torrent(torrent):
     torrent_data = parse_torrent(torrent)
     # announce = torrent_data['trackers']['http'][2]
+    peers = []
 
     for announce in torrent_data['trackers']['http']:
-        print(get_peers_from_tracker(announce, torrent_data))
+        peers.extend(get_peers_from_tracker(announce, torrent_data))
+
+    return peers
 
 
 def get_peers_from_tracker(announce, torrent_data):
     response = connect_to_tracker(announce, torrent_data)
-    pprint(response)
+    if not response:
+        return []  # if error has occurred empty list of peers will be returned
+
+    pprint(response)  # TODO: delete this afterwards
 
     # response from tracker is bencoded and binary representation of peers addresses will be parsed to readable form
     decoded = bencodepy.decode(response)
+
+    peers = []
     bin_peers = decoded[b'peers']
-    peers = ""
     # bin peers data is field of bytes, where each 6 bytes represent one peer
+    # for each peer will be appended to peers list
     for i in range(0, len(bin_peers), 6):
-        peers += parse_bin_peer(bin_peers[i:i + 6]) + "\n"
+        peers.append(parse_bin_peer(bin_peers[i:i + 6]))
 
     return peers
 
 
 def parse_bin_peer(bin_peer):
-    # will return a string containing first four bytes of byte peer formatted as IP address
-    # and second two as unsigned integer port for big endian network conversion
     return "%d.%d.%d.%d:%d" % (int(bin_peer[0]), int(bin_peer[1]), int(bin_peer[2]), int(bin_peer[3]),
                                struct.unpack(">H", bin_peer[4:6])[0])  # dereference of returned tuple first item
 
@@ -190,7 +198,21 @@ def start():
     torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
 
     peers_list = get_peers_for_torrent(torrent)
-    print(peers_list)
+    pprint(peers_list)
+
+    # UNIQUE SORTING TODO: see if it is necessary
+    # print("pred %d" % len(peers_list))
+    # a = unique(peers_list)
+    # print("po %d" % len(a))
+
+
+
+
+# ONLY FOR UNIQUE SORTING TODO: if not necessary, delete it
+def unique(seq):
+    seen = set()
+    seen_add = seen.add
+    return [x for x in seq if not (x in seen or seen_add(x))]
 
 
 if __name__ == '__main__':
