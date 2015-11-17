@@ -59,7 +59,13 @@ def download_torrent(url):
         error('Exception happened\n\n' + str(e), 3)
 
 
-def open_torrent(name, gzipped=False):
+def open_torrent(name, gzipped=False) -> str:
+    """Function will open and read the data of the torrent file, if needed it will also gzip decode it
+
+    :param str name: file name of the torrent to open and read
+    :param bool gzipped: signalize if file is gzipped or not (default is False)
+    :return: data of the opened torrent
+    """
     if gzipped:
         return open_gzipped_file(name)
     else:
@@ -67,12 +73,22 @@ def open_torrent(name, gzipped=False):
         return open_standard_file(name)
 
 
-def open_standard_file(name):
+def open_standard_file(name) -> str:
+    """Function to read standard file
+
+    :param str name: file name to open and read
+    :return: data of the opened file
+    """
     with open(name, 'rb') as f:
         return f.read()
 
 
-def open_gzipped_file(name):
+def open_gzipped_file(name) -> str:
+    """Function to read gzipped standard file
+
+    :param str name: file name to open and read
+    :return: data of the opened and decoded file
+    """
     log("Decompressing response")
     with open(name, 'rb') as f:
         torrent = gzip.decompress(f.read())
@@ -81,7 +97,7 @@ def open_gzipped_file(name):
     return torrent
 
 
-def parse_torrent(torrent):
+def parse_torrent(torrent) -> dict:
     # Decoded torrent_metadata object contains b'value' as binary data, that is why we need use it explicitly sometimes,
     # otherwise it wont match the values
     torrent_data = {'metadata': bencodepy.decode(torrent), 'trackers': {'http': [], 'udp': []}, 'info_hash': '',
@@ -119,7 +135,7 @@ def usable_trackers(tracker, trackers):
             log("tracker is not http or upd ( " + tracker + " )")
 
 
-def get_info_hash(metadata):
+def get_info_hash(metadata) -> str:
     # info metadata are again bencoded and sha1 hash is created from them
     return hashlib.sha1(bencodepy.encode(metadata)).digest()
 
@@ -151,12 +167,12 @@ def connect_to_tracker(announce, torrent_data):
         error('Exception happened\n\n' + str(e), 99)
 
 
-def create_tracker_request(params):
+def create_tracker_request(params) -> str:
     return "?%s" % urlencode({'uploaded': 0, 'downloaded': 0, 'left': 1000, 'compact': 1, 'port': 6886,
                               'info_hash': params['info_hash'], 'peer_id': params['peer_id']})
 
 
-def get_peers_for_torrent(torrent):
+def get_peers_for_torrent(torrent) -> list:
     torrent_data = parse_torrent(torrent)
     # announce = torrent_data['trackers']['http'][2]
     peers = []
@@ -167,7 +183,7 @@ def get_peers_for_torrent(torrent):
     return peers
 
 
-def get_peers_from_tracker(announce, torrent_data):
+def get_peers_from_tracker(announce, torrent_data) -> list:
     response = connect_to_tracker(announce, torrent_data)
     if not response:
         return []  # if error has occurred empty list of peers will be returned
@@ -187,7 +203,11 @@ def get_peers_from_tracker(announce, torrent_data):
     return peers
 
 
-def parse_bin_peer(bin_peer):
+def parse_bin_peer(bin_peer) -> str:
+    """Function to create readable IP address and port string of the peer
+
+    :return: IP address string of the peer
+    """
     return "%d.%d.%d.%d:%d" % (int(bin_peer[0]), int(bin_peer[1]), int(bin_peer[2]), int(bin_peer[3]),
                                struct.unpack(">H", bin_peer[4:6])[0])  # dereference of returned tuple first item
 
@@ -204,8 +224,6 @@ def start():
     # print("pred %d" % len(peers_list))
     # a = unique(peers_list)
     # print("po %d" % len(a))
-
-
 
 
 # ONLY FOR UNIQUE SORTING TODO: if not necessary, delete it
