@@ -101,7 +101,7 @@ def parse_torrent(torrent) -> dict:
     # Decoded torrent_metadata object contains b'value' as binary data, that is why we need use it explicitly sometimes,
     # otherwise it wont match the values
     torrent_data = {'metadata': bencodepy.decode(torrent), 'trackers': {'http': [], 'udp': []}, 'info_hash': '',
-                    'peer_id': "PY3-ISA-project-2015"}
+                    'hex_info_hash': '', 'peer_id': "PY3-ISA-project-2015"}
 
     # if 'announce-list' keyword is missing in list, there is only one tracker for this torrent available
     # and therefor 'announce' will be used to connect to the torrent tracker
@@ -114,6 +114,7 @@ def parse_torrent(torrent) -> dict:
         usable_trackers(torrent_data['metadata'][b'announce'], torrent_data['trackers'])
 
     torrent_data['info_hash'] = get_info_hash(torrent_data['metadata'][b'info'])
+    torrent_data['hex_info_hash'] = get_info_hash(torrent_data['metadata'][b'info'], True)
 
     return torrent_data
 
@@ -135,9 +136,12 @@ def usable_trackers(tracker, trackers):
             log("tracker is not http or upd ( " + tracker + " )")
 
 
-def get_info_hash(metadata) -> str:
+def get_info_hash(metadata, hex_hash=False) -> str:
     # info metadata are again bencoded and sha1 hash is created from them
-    return hashlib.sha1(bencodepy.encode(metadata)).digest()
+    if hex_hash:
+        return hashlib.sha1(bencodepy.encode(metadata)).hexdigest()
+    else:
+        return hashlib.sha1(bencodepy.encode(metadata)).digest()
 
 
 def connect_to_tracker(announce, torrent_data):
@@ -177,10 +181,13 @@ def get_peers_for_torrent(torrent) -> list:
     # announce = torrent_data['trackers']['http'][2]
     peers = []
 
+    if not torrent_data['trackers']['http']:
+        log('List of HTTP trackers is empty')  # TODO: return or end script
+
     for announce in torrent_data['trackers']['http']:
         peers.extend(get_peers_from_tracker(announce, torrent_data))
 
-    return peers
+    write_peers_to_file(torrent_data['hex_info_hash'], peers)
 
 
 def get_peers_from_tracker(announce, torrent_data) -> list:
@@ -206,10 +213,27 @@ def get_peers_from_tracker(announce, torrent_data) -> list:
 def parse_bin_peer(bin_peer) -> str:
     """Function to create readable IP address and port string of the peer
 
-    :return: IP address string of the peer
+    Args:
+        bin_peer (bytes): six byte representation of peer binary data
+
+    Returns:
+        str: IP address string of the peer
     """
     return "%d.%d.%d.%d:%d" % (int(bin_peer[0]), int(bin_peer[1]), int(bin_peer[2]), int(bin_peer[3]),
                                struct.unpack(">H", bin_peer[4:6])[0])  # dereference of returned tuple first item
+
+
+def write_peers_to_file(name, peers):
+    """Function to read standard file
+
+    Args:
+        name (str): file name to write to
+        peers (list): list of peers to write
+    """
+    pprint(name)
+    with open(name + ".peerlist", 'w') as f:
+        for peer in peers:
+            f.write(peer + "\n")
 
 
 def start():
@@ -217,8 +241,7 @@ def start():
 
     torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
 
-    peers_list = get_peers_for_torrent(torrent)
-    pprint(peers_list)
+    get_peers_for_torrent(torrent)
 
     # UNIQUE SORTING TODO: see if it is necessary
     # print("pred %d" % len(peers_list))
