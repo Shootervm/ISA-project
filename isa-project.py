@@ -1,13 +1,13 @@
-#!/usr/bin/env python3.4
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
-from urllib.error import URLError
-from urllib.parse import urlencode
+from isaCommon import log, error
+from isaConnector import connect_to_tracker
+import isaCommon
 import os
 import shutil
-import sys
 import gzip
 import bencodepy
 import hashlib
@@ -16,29 +16,9 @@ import struct
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
 
-class Torrent:
-    """Simple class that will represent torrent file and methods over it"""
-
-    def __init__(self, file_name):
-        self.file_name = file_name
-
-
-def log(message, out=sys.stderr):
-    print("[  Log  ] " + message + "\n", file=out)
-
-
-def error(message, code=1, err="", out=sys.stderr):
-    if err == 'http':
-        print("[ Error ] response from server was not OK, HTTP error code [ " + message + "]" + "\n", file=out)
-        exit(code)
-    else:
-        print("[ Error ] " + message + "\n", file=out)
-        exit(code)
-
-
 def download_torrent(url):
     fname = os.getcwd() + '/' + url.split('title=')[-1] + '.torrent'
-    log('Downloading >> ' + fname)
+    log('Downloading >> ' + fname, 1)
 
     try:
         get_request = request.Request(url, method='GET', headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)',
@@ -69,11 +49,11 @@ def open_torrent(name, gzipped=False) -> str:
     if gzipped:
         return open_gzipped_file(name)
     else:
-        log("File should not be compressed according to response header")
+        log("File should not be compressed according to response header", 2)
         return open_standard_file(name)
 
 
-def open_standard_file(name) -> str:
+def open_standard_file(name) -> bytes:
     """Function to read standard file
 
     :param str name: file name to open and read
@@ -83,13 +63,13 @@ def open_standard_file(name) -> str:
         return f.read()
 
 
-def open_gzipped_file(name) -> str:
+def open_gzipped_file(name) -> bytes:
     """Function to read gzipped standard file
 
     :param str name: file name to open and read
     :return: data of the opened and decoded file
     """
-    log("Decompressing response")
+    log("Decompressing response", 2)
     with open(name, 'rb') as f:
         torrent = gzip.decompress(f.read())
     with open(name, 'wb') as f:
@@ -106,10 +86,10 @@ def parse_torrent(torrent) -> dict:
     # if 'announce-list' keyword is missing in list, there is only one tracker for this torrent available
     # and therefor 'announce' will be used to connect to the torrent tracker
     if b'announce-list' in torrent_data['metadata']:
-        log("announce-list keyword is present, there are more possible trackers")
+        log("announce-list keyword is present, there are more possible trackers", 2)
         usable_trackers(torrent_data['metadata'][b'announce-list'], torrent_data['trackers'])
     else:
-        log("announce-list keyword is NOT present in dictionary, only one choice for tracker")
+        log("announce-list keyword is NOT present in dictionary, only one choice for tracker", 2)
         # here will be value under keyword announce used as only tracker
         usable_trackers(torrent_data['metadata'][b'announce'], torrent_data['trackers'])
 
@@ -133,7 +113,7 @@ def usable_trackers(tracker, trackers):
         elif tracker[:3] == b'udp':
             trackers['udp'].append(tracker.decode("utf-8"))
         else:
-            log("tracker is not http or upd ( " + tracker + " )")
+            log("tracker is not http or upd ( " + tracker + " )", 3)
 
 
 def get_info_hash(metadata, hex_hash=False) -> str:
@@ -144,47 +124,16 @@ def get_info_hash(metadata, hex_hash=False) -> str:
         return hashlib.sha1(bencodepy.encode(metadata)).digest()
 
 
-def connect_to_tracker(announce, torrent_data):
-    url = announce + create_tracker_request(torrent_data)
-    pprint(url)
-
-    fname = "test_connect.get"
-    try:
-        get_request = request.Request(url, method='GET', headers={'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64)',
-                                                                  'Accept-Charset': 'utf-8', 'Connection': '*',
-                                                                  'Accept': 'application/x-bittorrent'})
-        response = request.urlopen(get_request)
-
-        if response.getcode() is not 200:
-            error(response.getcode(), 3, 'http')
-
-        with open(fname, 'wb') as f:
-            shutil.copyfileobj(response, f)
-
-        # server response can be gzipped, this will decode the response so torrent will can be parsed
-        return open_torrent(fname, response.getheader('Content-Encoding') == 'gzip')
-
-    except URLError as e:
-        log('Due to exception ' + str(e) + ' skipping tracker [ ' + announce + ' ]\n')
-        return
-    except Exception as e:
-        error('Exception happened\n\n' + str(e), 99)
-
-
-def create_tracker_request(params) -> str:
-    return "?%s" % urlencode({'uploaded': 0, 'downloaded': 0, 'left': 1000, 'compact': 1, 'port': 6886,
-                              'info_hash': params['info_hash'], 'peer_id': params['peer_id']})
-
-
 def get_peers_for_torrent(torrent) -> list:
     torrent_data = parse_torrent(torrent)
     # announce = torrent_data['trackers']['http'][2]
     peers = []
 
     if not torrent_data['trackers']['http']:
-        log('List of HTTP trackers is empty')  # TODO: return or end script
+        log('List of HTTP trackers is empty', 0)  # TODO: return or end script
 
     for announce in torrent_data['trackers']['http']:
+        log("Getting peers for announce %s" % announce, 1)
         peers.extend(get_peers_from_tracker(announce, torrent_data))
 
     write_peers_to_file(torrent_data['hex_info_hash'], peers)
@@ -192,13 +141,19 @@ def get_peers_for_torrent(torrent) -> list:
 
 def get_peers_from_tracker(announce, torrent_data) -> list:
     response = connect_to_tracker(announce, torrent_data)
-    if not response:
+    if response == b'':
+        log('Response of tracker was empty', 2)
         return []  # if error has occurred empty list of peers will be returned
 
-    pprint(response)  # TODO: delete this afterwards
-
-    # response from tracker is bencoded and binary representation of peers addresses will be parsed to readable form
+    # response from tracker is bencoded binary representation of peers addresses will be parsed to readable form
     decoded = bencodepy.decode(response)
+
+    if not decoded:
+        log("Decoded response is empty", 1)
+        return []
+    elif b'peers' not in decoded:
+        log("Decoded response has no peers data in it", 1)
+        return []
 
     peers = []
     bin_peers = decoded[b'peers']
@@ -230,35 +185,24 @@ def write_peers_to_file(name, peers):
         name (str): file name to write to
         peers (list): list of peers to write
     """
-    pprint(name)
     with open(name + ".peerlist", 'w') as f:
         for peer in peers:
             f.write(peer + "\n")
 
 
 def start():
-    # torrent = download_torrent("http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
+    torrent = download_torrent(
+        "http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit")
 
-    torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
+    # torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
 
     get_peers_for_torrent(torrent)
 
-    # UNIQUE SORTING TODO: see if it is necessary
-    # print("pred %d" % len(peers_list))
-    # a = unique(peers_list)
-    # print("po %d" % len(a))
-
-
-# ONLY FOR UNIQUE SORTING TODO: if not necessary, delete it
-def unique(seq):
-    seen = set()
-    seen_add = seen.add
-    return [x for x in seq if not (x in seen or seen_add(x))]
-
 
 if __name__ == '__main__':
+    isaCommon.SHOW_FLAG = 1  # ALL LOGs WILL BE DISPLAYED
     try:
         start()
     except KeyboardInterrupt:
-        log('Script will be terminated!')
+        error('Script will be terminated!', 0)
         exit(0)
