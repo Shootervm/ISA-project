@@ -3,9 +3,8 @@
 
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from urllib import request
-from isaCommon import log, error
+from isaCommon import log, error, get_udp_transaction_id
 from isaConnector import connect_to_http_tracker, connect_to_udp_tracker
-import isaCommon
 import os
 import shutil
 import gzip
@@ -135,34 +134,43 @@ def get_peers_for_torrent(torrent):
     if not torrent_data['trackers']['http']:
         log('List of HTTP trackers is empty', 0)  # TODO: return or end script
 
+    # Get peers for trackers
     for announce in torrent_data['trackers']['http']:
         log("Getting peers for announce %s" % announce, 1)
         peers.extend(get_peers_from_tracker(announce, torrent_data))
-
-    peers.extend(get_peers_from_tracker("", torrent_data, http=False))  # should be get_peers_from_tracker(announce, torrent_data)
+    for announce in torrent_data['trackers']['udp']:
+        log("Getting peers for announce %s" % announce, 1)
+        peers.extend(get_peers_from_tracker(announce, torrent_data, http=False))
 
     write_peers_to_file(torrent_data['hex_info_hash'], peers)
 
 
 def get_peers_from_tracker(announce, torrent_data, http=True) -> list:
-    response = connect_to_http_tracker(announce, torrent_data) if http else connect_to_udp_tracker(
-        torrent_data['trackers']['udp'][0], torrent_data)
+    if http:
+        response = connect_to_http_tracker(announce, torrent_data)
+    else:
+        transaction_id = get_udp_transaction_id()  # randomized transaction ID for UDP
+        response = connect_to_udp_tracker(announce, torrent_data, transaction_id)
+
     if response == b'':
         log('Response of tracker was empty', 2)
         return []  # if error has occurred empty list of peers will be returned
 
-    # response from tracker is bencoded binary representation of peers addresses will be parsed to readable form
-    decoded = bencodepy.decode(response)
-
-    if not decoded:
-        log("Decoded response is empty", 1)
-        return []
-    elif b'peers' not in decoded:
-        log("Decoded response has no peers data in it", 1)
-        return []
+    if http:
+        # response from tracker is bencoded binary representation of peers addresses will be parsed to readable form
+        decoded = bencodepy.decode(response)
+        if not decoded:
+            log("Decoded response is empty", 1)
+            return []
+        elif b'peers' not in decoded:
+            log("Decoded response has no peers data in it", 1)
+            return []
+        bin_peers = decoded[b'peers']
+    else:
+        bin_peers = parse_udp_announce_response(response, transaction_id)
 
     peers = []
-    bin_peers = decoded[b'peers']
+
     # bin peers data is field of bytes, where each 6 bytes represent one peer
     # for each peer will be appended to peers list
     for i in range(0, len(bin_peers), 6):
@@ -181,7 +189,7 @@ def parse_bin_peer(bin_peer) -> str:
         str: IP address string of the peer
     """
     return "%d.%d.%d.%d:%d" % (int(bin_peer[0]), int(bin_peer[1]), int(bin_peer[2]), int(bin_peer[3]),
-                               struct.unpack(">H", bin_peer[4:6])[0])  # dereference of returned tuple first item
+                               struct.unpack("!H", bin_peer[4:6])[0])  # dereference of returned tuple first item
 
 
 def write_peers_to_file(name, peers):
@@ -196,21 +204,28 @@ def write_peers_to_file(name, peers):
             f.write(peer + "\n")
 
 
-def start():
-    # url = "http://torcache.net/torrent/3F19B149F53A50E14FC0B79926A391896EABAB6F.torrent?title=[kat.cr]ubuntu.15.10.desktop.64.bit"
-    # torrent = download_torrent(url)
-    torrent = open_torrent('/home/shooter/PROJECTS/SCHOOL/ISA-project/[kat.cr]ubuntu.15.10.desktop.64.bit.torrent')
+def parse_udp_announce_response(response, transaction_id) -> bytes:
+    # Handle the errors of udp announce response
+    if len(response) < 20:  # constant 20 represents min byte length that is required only for metadata without peers
+        log("Too short response length %s, returning empty response" % len(response), 0)
+        return b''
 
-    get_peers_for_torrent(torrent)
+    action = struct.unpack_from("!I", response)[0]
+    if action != 0x1:
+        log("Received wrong action number %d, returning empty response" % action, 0)
+        return b''
 
+    received_transaction_id = struct.unpack_from("!I", response, 4)[0]  # next 4 bytes is transaction id
+    if received_transaction_id != transaction_id:
+        log("Transaction ID is wrong. Expected %s, received %s, returning empty response"
+            % (transaction_id, received_transaction_id), 0)
+        return b''
 
-if __name__ == '__main__':
-    # max log deep is 3, if you choose 3 or more ALL LOGs WILL BE DISPLAYED
-    # if -1 there will be NO LOGs at all, and 0 is displaying only non breaking error logs
-    isaCommon.SHOW_FLAG = 5
+    log("Reading Response", 3)
+    meta = dict()
+    offset = 8  # Action and Transaction ID has been at first 8 bytes, that is why offset 8 is needed
+    meta['interval'], meta['leeches'], meta['seeds'] = struct.unpack_from("!iii", response, offset)
+    offset += 12  # three integers by 4 bytes
+    log("Interval = %d, Leeches = %d, Seeds = %d" % (meta['interval'], meta['leeches'], meta['seeds']), 3)
 
-    try:
-        start()
-    except KeyboardInterrupt:
-        error('Script will be terminated!', 0)
-        exit(0)
+    return response[offset:]  # all the rest data in response are peers coded as 6 byte entities
