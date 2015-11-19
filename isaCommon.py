@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import sys
+import random
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
@@ -26,8 +27,5 @@ def error(message, code=1, err="", out=sys.stderr):
         exit(code)
 
 
-# ONLY FOR UNIQUE SORTING TODO: if not necessary, delete it
-def unique(seq):
-    seen = set()
-    seen_add = seen.add
-    return [x for x in seq if not (x in seen or seen_add(x))]
+def get_udp_transaction_id():
+    return int(random.randrange(0, 255))
