@@ -1,40 +1,49 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from isaCommon import log, error
+from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
+from isaCommon import log, error, get_udp_transaction_id
 from urllib.parse import urlencode, urlparse
 import socket
+import struct
 import re
+
+TIMEOUT = 7  # default is set to 7 seconds, use None for no timeout
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
 
-def create_socket(hostname, port):
-    log('Creating socket', 2)
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+def create_socket(hostname, port, http=True) -> socket:
+    if http:
+        log('Creating socket', 2)
+        # TODO: there probably could be IPv6 socket condition
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    else:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    s.settimeout(TIMEOUT)  # TODO: set and test timeout
 
     try:
         log("Connecting to tracker socket", 2)
         s.connect((hostname, port))
     except socket.gaierror:
-        log('Can not translate %s to IP address' % hostname, 1)
+        log('Can not translate %s to IP address' % hostname, 0)
         s.close()
-        return None  # FIXME: asi nemozem vracat none
+        return None
     except Exception as e:
-        log('Connection to server has failed', 1)
+        log('Connection to server has failed %s' % str(e), 0)
         s.close()
-        error('Socket exception happened\n\n' + str(e), 88)
+        return None
 
-    s.settimeout(None)
-    return s  # return opened and connected socket
+    return s  # return opened and connected socket, if error happens closed socked is returned
 
 
-def connect_to_tracker(announce, torrent_data):
+def connect_to_http_tracker(announce, torrent_data):
     hostname = urlparse(announce).hostname
     port = urlparse(announce).port
 
-    s = create_socket(hostname, port)
-    if s is None:
+    s = create_socket(hostname, port, http=True)
+    if not isinstance(s, socket.socket):
         log("Returned socket is empty", 2)
         return b''
 
@@ -46,7 +55,7 @@ def connect_to_tracker(announce, torrent_data):
 
     # Send the GET message
     # GET request is created from announce path part, torrent data part and headers
-    send_get_message(s, urlparse(announce).path + create_tracker_request(torrent_data), headers)
+    send_get_message(s, create_tracker_request(urlparse(announce).path, torrent_data), headers)
 
     # Receive a response
     response, content_length, is_chunked, encoding = receive_response(s)
@@ -70,15 +79,24 @@ def connect_to_tracker(announce, torrent_data):
     return received
 
 
-def create_tracker_request(params) -> str:
-    return "?%s" % urlencode({'uploaded': 0, 'downloaded': 0, 'left': 1000, 'compact': 1, 'port': 6886,
-                              'info_hash': params['info_hash'], 'peer_id': params['peer_id']})
+def create_tracker_request(path, params) -> str:
+    return "%s?%s%s" % (urlparse(path).path,
+                        urlencode(
+                            {'uploaded': params['uploaded'], 'downloaded': params['downloaded'], 'left': params['left'],
+                             'compact': params['compact'], 'port': params['port'], 'numwant': params['numwant'],
+                             'info_hash': params['info_hash'], 'peer_id': params['peer_id']}),
+                        urlparse(path).query)
 
 
 def send_get_message(sock, path, headers):
+    """Function will send http GET message to tracer ip opened in passed socket
+
+    Args:
+        sock (object): socket that will be used for connection
+    """
     message = "GET " + path + " HTTP/1.0\r\n" + headers + "\r\n"
     message = bytes(message, 'utf-8')
-    log("Message is %s" % message, 3)  # TODO: this message is messing
+    log("Message is %s" % message, 3)
     try:
         log('Sending GET message to tracker', 2)
         sock.send(message)
@@ -116,7 +134,7 @@ def receive_response(sock):
     else:
         log("Unknown response from server -> code %s" % code, 2)
 
-    content_length = gef_conntent_length(response)
+    content_length = get_conntent_length(response)
 
     is_chunked = is_set_chunk(response)
     if is_chunked:
@@ -146,7 +164,7 @@ def receive_size(sock):
     return int(request, 16), _ret
 
 
-def gef_conntent_length(response):
+def get_conntent_length(response):
     match = re.search(r'Content-Length: [0-9]+', response, flags=re.DOTALL | re.MULTILINE)
     if match:
         return int(response[match.start() + 16:match.end()])
@@ -220,3 +238,92 @@ def is_set_chunk(request):
         return True
     else:
         return False
+
+
+def connect_to_udp_tracker(announce, torrent_data, transaction_id):
+    hostname = urlparse(announce).hostname
+    port = urlparse(announce).port
+
+    s = create_socket(hostname, port, http=False)
+    if s is None:
+        log("Returned socket is empty", 2)
+        return b''
+
+    connection_id = 0x41727101980  # default connection id
+
+    s.sendto(create_udp_connection_request(connection_id, transaction_id), (socket.gethostbyname(hostname), port))
+
+    try:
+        con_response = s.recvfrom(2048)[0]
+    except socket.timeout:
+        log("Socket connection has timed out", 0)
+        return b''
+    except socket.error as e:
+        log("Cannot connect %s" % e, 0)
+        s.close()
+        return b''
+    except Exception as e:
+        log('Connection to server has failed %s' % str(e), 0)
+        s.close()
+        return b''
+
+    connection_id = parse_udp_connection_response(con_response, transaction_id)
+    log("New connection ID is %u" % connection_id, 3)
+
+    socket_port = s.getsockname()[1]  # port number on which socket is communicating
+
+    s.sendto(create_udp_announce_request(connection_id, transaction_id, torrent_data, socket_port),
+             (socket.gethostbyname(hostname), port))
+
+    try:
+        response = s.recvfrom(2048)[0]
+    except socket.timeout:
+        log("Socket connection has timed out", 0)
+        return b''
+
+    return response
+
+
+def create_udp_connection_request(connection_id, transaction_id):
+    # Function will create udp request for getting new connection ID
+    request = struct.pack("!Q", connection_id)
+    request += struct.pack("!I", 0x0)  # action 0 means asking for new connection ID
+    request += struct.pack("!I", transaction_id)
+    return request
+
+
+def create_udp_announce_request(connection_id, transaction_id, torrent_data, port):
+    request = struct.pack("!Q", connection_id)  # connection ID
+    request += struct.pack("!I", 0x1)  # action (1 represents announce)
+    request += struct.pack("!I", transaction_id)  # transaction ID
+    request += struct.pack("!20s", torrent_data['info_hash'])  # info_hash of the torrent
+    request += struct.pack("!20s", bytes(torrent_data['peer_id'], "utf-8"))  # peer_id
+    request += struct.pack("!Q", int(torrent_data['downloaded']))
+    request += struct.pack("!Q", int(torrent_data['left']))
+    request += struct.pack("!Q", int(torrent_data['uploaded']))
+    request += struct.pack("!I", 0x2)  # event 2 should denote start of downloading
+    request += struct.pack("!I", 0x0)  # should be 0 (IP)
+    request += struct.pack("!I", get_udp_transaction_id())  # client key (have to be unique) randomized
+    request += struct.pack("!i", int(torrent_data['numwant']))  # (uint) is set to -1 (default), most peers are returned
+    request += struct.pack("!I", port)  # communication port of socket
+    return request
+
+
+def parse_udp_connection_response(response, sent_transaction_id):
+    # Handle the errors of udp announce response
+    if len(response) < 16:  # constant 16 represents min byte length that is required only for metadata
+        log("Too short response length %s, returning empty response" % len(response), 0)
+        return b''
+
+    action, res_transaction_id = struct.unpack_from("!II", response)
+
+    if res_transaction_id != sent_transaction_id:
+        log("Transaction ID is not same as Connection ID in response, Expected %s and got %s, returning empty response"
+            % (sent_transaction_id, res_transaction_id), 0)
+        return b''
+
+    if action == 0x0:  # Connection established, getting Connection ID
+        return struct.unpack_from("!Q", response, 8)[0]  # unpack 8 bytes, should be the connection_id
+    elif action == 0x3:  # Error message in response
+        log("Error message in response: { %s }, returning empty response" % struct.unpack_from("!s", response, 8)[0], 0)
+        return b''
