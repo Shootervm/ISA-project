@@ -4,11 +4,10 @@
 from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
 from isaCommon import log, error, get_udp_transaction_id
 from urllib.parse import urlencode, urlparse
+import isaCommon
 import socket
 import struct
 import re
-
-TIMEOUT = 7  # default is set to 7 seconds, use None for no timeout
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
@@ -21,7 +20,7 @@ def create_socket(hostname, port, http=True) -> socket:
     else:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-    s.settimeout(TIMEOUT)  # TODO: set and test timeout
+    s.settimeout(isaCommon.TIMEOUT)  # TODO: set and test timeout
 
     try:
         log("Connecting to tracker socket", 2)
