@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
+from pprint import pprint
 from isaCommon import log, get_udp_transaction_id
 from isaConnector import connect_to_http_tracker, connect_to_udp_tracker
 import bencodepy
 import hashlib
 import struct
+# Is imported as whole module because of setting values to the script environment global variables located in it
+import isaCommon
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 
@@ -69,12 +71,23 @@ def get_peers_for_torrent(torrent):
         log('List of HTTP trackers is empty', 0)  # TODO: return or end script
 
     # Get peers for trackers
-    for announce in torrent_data['trackers']['http']:
-        log("Getting peers for announce %s" % announce, 1)
-        peers.extend(get_peers_from_tracker(announce, torrent_data))
-    for announce in torrent_data['trackers']['udp']:
-        log("Getting peers for announce %s" % announce, 1)
-        peers.extend(get_peers_from_tracker(announce, torrent_data, http=False))
+    if isaCommon.params.tracker_annonce_url:
+        announce = isaCommon.params.tracker_annonce_url
+        log("Used only announce %s" % announce, 1)
+        pprint(announce)
+        if announce[:4] == 'http':
+            log("Getting peers for announce %s" % announce, 1)
+            peers.extend(get_peers_from_tracker(announce, torrent_data))
+        elif announce[:3] == 'udp':
+            log("Getting peers for announce %s" % announce, 1)
+            peers.extend(get_peers_from_tracker(announce, torrent_data, http=False))
+    else:
+        for announce in torrent_data['trackers']['http']:
+            log("Getting peers for announce %s" % announce, 1)
+            peers.extend(get_peers_from_tracker(announce, torrent_data))
+        for announce in torrent_data['trackers']['udp']:
+            log("Getting peers for announce %s" % announce, 1)
+            peers.extend(get_peers_from_tracker(announce, torrent_data, http=False))
 
     write_peers_to_file(torrent_data['hex_info_hash'], peers)
 
@@ -103,13 +116,13 @@ def get_peers_from_tracker(announce, torrent_data, http=True) -> list:
     else:
         bin_peers = parse_udp_announce_response(response, transaction_id)
 
+    log("There should be %u peers" % (len(bin_peers) / 6), 1)
     peers = []
 
     # bin peers data is field of bytes, where each 6 bytes represent one peer
     # for each peer will be appended to peers list
     for i in range(0, len(bin_peers), 6):
         peers.append(parse_bin_peer(bin_peers[i:i + 6]))
-
     return peers
 
 
@@ -137,12 +150,16 @@ def write_peers_to_file(name, peers):
         for peer in peers:
             f.write(peer + "\n")
 
+    log("Peers have been written to file %s.peerlist" % name, 1)
+
 
 def parse_udp_announce_response(response, transaction_id) -> bytes:
     # Handle the errors of udp announce response
     if len(response) < 20:  # constant 20 represents min byte length that is required only for metadata without peers
         log("Too short response length %s, returning empty response" % len(response), 0)
         return b''
+
+    log("Response length is %s" % len(response), 1)
 
     action = struct.unpack_from("!I", response)[0]
     if action != 0x1:
@@ -162,4 +179,5 @@ def parse_udp_announce_response(response, transaction_id) -> bytes:
     offset += 12  # three integers by 4 bytes
     log("Interval = %d, Leeches = %d, Seeds = %d" % (meta['interval'], meta['leeches'], meta['seeds']), 3)
 
+    log("Actual peer data in response are %s" % response[offset:], 3)
     return response[offset:]  # all the rest data in response are peers coded as 6 byte entities
