@@ -62,6 +62,8 @@ def generate_txt(rss_xml):
 def txt_append(elm, tag) -> str:
     # create line to txt file tag: text
     xml_elm = elm.find(tag)
+    if xml_elm is None:
+        return tag[2:] + ': \n'
     return xml_elm.tag + ': ' + xml_elm.text + '\n'
 
 

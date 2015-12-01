@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import pprint
 import sys
 import random
 import argparse
@@ -18,16 +17,20 @@ SHOW_FLAG = 0  # set to -1 for no logs, 0 is displaying only non breaking error 
 TIMEOUT = 7  # default is set to 7 seconds, use None for no timeout
 
 # Default log and error function output file (descriptor)
-output = sys.stderr
+LOG_OUT = sys.stdout
+ERR_OUT = sys.stderr
 
 
-def log(message, show=2, out=output):
+def log(message, show=2, out=LOG_OUT, not_err=False):
     # SHOW_FLAG will determine which logs will be printed out
     if show <= SHOW_FLAG:
-        print("[  Log  ] " + message + "\n", file=out)
+        if show == 0 and not not_err:
+            print("[ Error ] " + message + "\n", file=ERR_OUT)
+        else:
+            print("[  Log  ] " + message + "\n", file=out)
 
 
-def error(message, code=1, err="", out=sys.stderr):
+def error(message, code=1, err="", out=ERR_OUT):
     if err == 'http':
         print("[ Error ] response from server was not OK, HTTP error code [ " + message + "]" + "\n", file=out)
         exit(code)
@@ -37,19 +40,19 @@ def error(message, code=1, err="", out=sys.stderr):
 
 
 def get_udp_transaction_id():
-    return int(random.randrange(0, 255))
+    return int(random.randrange(42))
 
 
-def check_parameters(params):
+def check_parameters(parameters):
     # Function will check parameters of the script
     # there is at least one required parameter but only one can be present at the same time,
     # if there are more or none of required script will be terminated with error message and error code
     count = 0
-    if params.rss:
+    if parameters.rss:
         count += 1
-    if params.input_announcement:
+    if parameters.input_announcement:
         count += 1
-    if params.torrent_file:
+    if parameters.torrent_file:
         count += 1
     if count > 1:
         error("Wrong combination of script parameters", 5)

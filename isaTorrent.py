@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 from pprint import pprint
 from isaCommon import log, get_udp_transaction_id
 from isaConnector import connect_to_http_tracker, connect_to_udp_tracker
-import bencodepy
 import hashlib
 import struct
 # Is imported as whole module because of setting values to the script environment global variables located in it
 import isaCommon
+
+try:
+    import bencodepy
+except ImportError:
+    from bencodepyFolder import bencodepy
 
 __author__ = 'xmasek15@stud.fit.vutbr.cz'
 

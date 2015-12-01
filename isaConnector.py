@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from pprint import pprint  # only for debug and test reasons, to pretty print objects and lists
-from isaCommon import log, error, get_udp_transaction_id
+from isaCommon import log, get_udp_transaction_id
 from urllib.parse import urlencode, urlparse
 import isaCommon
 import socket
@@ -59,6 +58,10 @@ def connect_to_http_tracker(announce, torrent_data):
     # Receive a response
     response, content_length, is_chunked, encoding = receive_response(s)
     log('Response received', 2)
+
+    if response is None:
+        log("No response form server", 0)
+        return b''
 
     if is_chunked:
         log("Starting chunked communication", 3)
@@ -121,6 +124,10 @@ def receive_response(sock):
     log('Waiting for response', 3)
     response = receive_header(sock)
     log('Response from server: %s' % response)
+
+    if response is None:
+        return None, None, None, None
+
     response = response.decode('utf-8')
 
     code = check_response(response)
@@ -211,9 +218,7 @@ def receiving(sock, content_length):
 
     if len(received) != content_length:
         sock.close()
-        print(len(received), "   ", content_length)
-        print(received)
-        error("While receiving, length is not right", 5)
+        log("Corruption while receiving, length is not right", 0)
 
     # log('Received from server: %s' % received, 3)
     return received
@@ -222,7 +227,12 @@ def receiving(sock, content_length):
 def receive_header(sock):
     request = b''
     while True:
-        request += sock.recv(1)
+
+        try:
+            request += sock.recv(1)
+        except Exception as e:
+            log("Exception during receiving: %s" % e, 0)
+            return None
 
         if len(request) > 4 and request[len(request) - 4:] == b'\r\n\r\n':
             break
@@ -300,7 +310,7 @@ def create_udp_announce_request(connection_id, transaction_id, torrent_data, por
     request += struct.pack("!Q", int(torrent_data['downloaded']))
     request += struct.pack("!Q", int(torrent_data['left']))
     request += struct.pack("!Q", int(torrent_data['uploaded']))
-    request += struct.pack("!I", 0x2)  # event 2 should denote start of downloading
+    request += struct.pack("!I", 0x2)  # event 2 should detonate start of downloading
     request += struct.pack("!I", 0x0)  # should be 0 (IP)
     request += struct.pack("!I", get_udp_transaction_id())  # client key (have to be unique) randomized
     request += struct.pack("!i", int(torrent_data['numwant']))  # (uint) is set to -1 (default), most peers are returned
