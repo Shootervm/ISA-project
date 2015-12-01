@@ -1,14 +1,15 @@
 all:
-	@echo "Please run ./antipirat script"
+	@chmod +x ./antipirat
+	@echo "Please run ./antipirat python3 script"
 
 run:
-	./antipirat.py --help
+	./antipirat --help
 
 .PHONY: clean pack
 
 clean:
-	@rm -rf *.xml *.torrent *.txt *.peerlist 2>/dev/null
+	@rm -rf __pycache__ *.xml *.torrent *.txt *.peerlist 2>/dev/null
 	@rm -rf xmasek15.tar 2>/dev/null
 
-pack:
-	tar cf xmasek15.tar *
+pack: clean
+	@tar cf xmasek15.tar *.py antipirat Makefile README* manual.pdf bencodepyFolder

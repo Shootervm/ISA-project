@@ -51,7 +51,7 @@ if __name__ == '__main__':
     isaCommon.SHOW_FLAG = 1  # max log deep is 3, if you choose 3 or more ALL LOGs WILL BE DISPLAYED
 
     # set connection timeout to specific value in seconds (None for no timeout), default is 10 seconds
-    isaCommon.TIMEOUT = 3
+    isaCommon.TIMEOUT = 10
     # when testing best values for timeout were 5-10 and circa 7 seconds, more than 10 seemed to have no effect on
     # getting response from not responding trackers, most of them didn't responded even after the 50 seconds and more
 
